@@ -295,6 +295,9 @@ class TrackingSourceStats:
     invalid_frame_count: int
     decode_warning_count: int
     last_error: str | None
+    # What the client said about itself in its CONNECT and VERSION packets,
+    # e.g. "TestDevice|1.0|1.0.1" from the Quest client. Empty until it does.
+    client_version: str = ""
 
 
 class V1TrackingSource:
@@ -327,6 +330,7 @@ class V1TrackingSource:
         self._invalid_frame_count = 0
         self._decode_warning_count = 0
         self._last_error: str | None = None
+        self._client_version = ""
         self._ready = threading.Event()
         self._startup_error: BaseException | None = None
         self._thread: threading.Thread | None = None
@@ -408,6 +412,7 @@ class V1TrackingSource:
                 invalid_frame_count=self._invalid_frame_count,
                 decode_warning_count=self._decode_warning_count,
                 last_error=self._last_error,
+                client_version=self._client_version,
             )
 
     def feed_bytes(
@@ -443,6 +448,7 @@ class V1TrackingSource:
             self._connected = True
             self._stream_epoch += 1
             self._last_tracking_timestamp_ns = 0
+            self._client_version = ""
         self._on_status(f"headset connected: {address[0]}:{address[1]}")
 
     def _on_disconnect(self) -> None:
@@ -466,6 +472,10 @@ class V1TrackingSource:
     def _handle_packet(self, packet: Mapping[str, object], received_ns: int) -> None:
         with self._lock:
             self._packet_count += 1
+        if packet.get("cmd") == CMD_VERSION:
+            with self._lock:
+                self._client_version = str(packet.get("body_str", ""))[:120]
+            return
         if packet.get("cmd") != CMD_FUNCTION:
             return
         tracking = TrackingDecoder.decode_tracking(packet)

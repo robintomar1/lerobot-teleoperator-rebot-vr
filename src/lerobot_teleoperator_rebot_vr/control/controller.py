@@ -59,6 +59,8 @@ class FullBodyQPIKController:
             grip_press_threshold=self.config.grip_press_threshold,
             grip_release_threshold=self.config.grip_release_threshold,
             stale_timeout_s=self.config.stale_timeout_s,
+            jump_speed_m_s=self.config.tracking_jump_speed_m_s,
+            jump_rate_rad_s=float(np.deg2rad(self.config.tracking_jump_rate_deg_s)),
         )
         model_lower = np.asarray(kinematics.lower_position_limit, dtype=np.float64)
         model_upper = np.asarray(kinematics.upper_position_limit, dtype=np.float64)

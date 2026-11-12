@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -22,6 +23,14 @@ DEFAULT_XR_TO_WORLD = np.array(
     ],
     dtype=np.float64,
 )
+
+
+logger = logging.getLogger(__name__)
+
+# Allowance on top of speed * dt before a step between two samples counts as a
+# jump: tracking noise, and samples that arrive bunched together.
+JUMP_SLACK_M = 0.03
+JUMP_SLACK_RAD = float(np.deg2rad(5.0))
 
 
 class TeleopState(str, Enum):
@@ -118,6 +127,8 @@ class RelativePoseMapper:
         position_filter_cutoff_hz: float | None = None,
         orientation_filter_cutoff_hz: float | None = None,
         stale_timeout: float | None = None,
+        jump_speed_m_s: float = 0.0,
+        jump_rate_rad_s: float = 0.0,
     ) -> None:
         self.side = normalize_controller_side(side)
         self.xr_to_world = _rotation_matrix(xr_to_world, "xr_to_world")
@@ -155,6 +166,14 @@ class RelativePoseMapper:
         self.grip_press_threshold = float(grip_press_threshold)
         self.grip_release_threshold = float(grip_release_threshold)
         self.stale_timeout_ns = int(float(stale_timeout_s) * 1e9)
+        jump_limits = np.asarray((jump_speed_m_s, jump_rate_rad_s), dtype=np.float64)
+        if not np.all(np.isfinite(jump_limits)) or np.any(jump_limits < 0.0):
+            raise ValueError("pose jump limits must be finite and non-negative")
+        # Zero disables the guard, which is the behaviour without it.
+        self.jump_speed_m_s = float(jump_speed_m_s)
+        self.jump_rate_rad_s = float(jump_rate_rad_s)
+        self.jump_count = 0
+        self._last_raw_pose: tuple[tuple[int, int, int], np.ndarray, np.ndarray] | None = None
 
         self.state = TeleopState.WAITING
         self._ever_received_tracking = False
@@ -233,6 +252,13 @@ class RelativePoseMapper:
                 self._clear_references()
                 self.state = TeleopState.IDLE
                 return self._result(None)
+            if self._pose_jumped(sample):
+                # The controller cannot have moved like that: tracking was lost
+                # or re-acquired. Let go, and hold until Grip is released.
+                self._clear_references()
+                self._require_release = True
+                self.state = TeleopState.IDLE
+                return self._result(None)
             target, diagnostics = self._compute_target(sample)
             return self._result(target, orientation_diagnostics=diagnostics)
 
@@ -241,6 +267,8 @@ class RelativePoseMapper:
             return self._result(None)
 
         self._capture_references(sample, ee_position_array, ee_rotation_array)
+        self._last_raw_pose = None
+        self._pose_jumped(sample)
         self.state = TeleopState.ACTIVE
         initial_target = PoseTarget(received_ns, ee_position_array, ee_rotation_array)
         self._filtered_target = initial_target
@@ -256,6 +284,51 @@ class RelativePoseMapper:
                 ee_reference_rotation=ee_rotation_array,
             ),
         )
+
+    def _pose_jumped(self, sample: ControllerSample | VRFrame) -> bool:
+        """Whether this sample is implausibly far from the previous one."""
+        if self.jump_speed_m_s <= 0.0 and self.jump_rate_rad_s <= 0.0:
+            return False
+        if isinstance(sample, ControllerSample):
+            position, quaternion = sample.position, sample.quaternion_xyzw
+        else:
+            position, quaternion = sample.grip_pos, sample.grip_quat
+        key = sample_key(sample)
+        rotation = Rotation.from_quat(quaternion).as_matrix()
+        previous = self._last_raw_pose
+        if previous is not None and previous[0] == key:
+            return False
+        self._last_raw_pose = (key, np.asarray(position, dtype=np.float64).copy(), rotation)
+        if previous is None:
+            return False
+        previous_key, previous_position, previous_rotation = previous
+        # Same clock choice as the target filter: the sender's when it advances,
+        # otherwise the PC's receive time.
+        if key[1] > 0 and previous_key[1] > 0 and key[1] > previous_key[1]:
+            elapsed_s = (key[1] - previous_key[1]) * 1e-9
+        else:
+            elapsed_s = max(0.0, (key[2] - previous_key[2]) * 1e-9)
+        step_m = float(np.linalg.norm(position - previous_position))
+        step_rad = float(
+            np.linalg.norm(Rotation.from_matrix(rotation @ previous_rotation.T).as_rotvec())
+        )
+        jumped = (
+            self.jump_speed_m_s > 0.0
+            and step_m > JUMP_SLACK_M + self.jump_speed_m_s * elapsed_s
+        ) or (
+            self.jump_rate_rad_s > 0.0
+            and step_rad > JUMP_SLACK_RAD + self.jump_rate_rad_s * elapsed_s
+        )
+        if jumped:
+            self.jump_count += 1
+            logger.warning(
+                "controller pose jumped %.3f m / %.1f deg in %.0f ms; following stopped, "
+                "release Grip and press it again",
+                step_m,
+                np.rad2deg(step_rad),
+                elapsed_s * 1e3,
+            )
+        return jumped
 
     def _enter_unavailable(self) -> None:
         self._clear_references()
@@ -410,6 +483,7 @@ class RelativePoseMapper:
         self._ee_rotation_ref = None
         self._filtered_target = None
         self._last_filtered_sample_key = None
+        self._last_raw_pose = None
 
     def _result(
         self,

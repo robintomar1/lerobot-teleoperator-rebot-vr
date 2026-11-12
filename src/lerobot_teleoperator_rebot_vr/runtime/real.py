@@ -39,6 +39,7 @@ from .safety import (
 )
 from .shutdown import ManagedFollower, ShutdownPolicy
 from .feedback_requests import limit_startup_feedback_requests
+from .motor_health import MotorHealthMonitor, read_motor_health
 
 
 logger = logging.getLogger(__name__)
@@ -175,6 +176,8 @@ def _run_arm(args, *, session=None, arm_id=None, observer=None) -> None:
         gripper_open_deg=args.gripper_open_deg,
         gripper_closed_deg=args.gripper_closed_deg,
         max_command_feedback_error_deg=args.max_relative_target_deg * 0.9,
+        tracking_jump_speed_m_s=args.tracking_jump_speed_m_s,
+        tracking_jump_rate_deg_s=args.tracking_jump_rate_deg_s,
     )
 
     if args.robot_model == "b601_rs":
@@ -231,7 +234,11 @@ def _run_arm(args, *, session=None, arm_id=None, observer=None) -> None:
             ),
             disable_torque_on_disconnect=args.disable_torque_on_disconnect,
         )
-        raw_robot = RebotB601Follower(robot_config)
+        if args.dry_run:
+            from ..hardware.simulated import SimulatedFollower
+            raw_robot = SimulatedFollower(robot_config)
+        else:
+            raw_robot = RebotB601Follower(robot_config)
     robot = ManagedFollower(
         raw_robot,
         policy=ShutdownPolicy(args.disable_attempts, args.disable_interval_s,
@@ -320,6 +327,9 @@ def _run_arm(args, *, session=None, arm_id=None, observer=None) -> None:
     preserve_torque_for_feedback_fault = False
     feedback_fault_active = False
     zero_return_completed = False
+    if args.dry_run:
+        print("DRY RUN: simulated follower. No port is opened, no motor is enabled, nothing moves. "
+              "Joint feedback is a first-order model of the commands, not the arm.", flush=True)
     print("Exit torque policy: " + ("disable motors; support the arm before exit."
           if args.disable_torque_on_disconnect else
           "retain motor torque; support the arm before explicitly disabling power."))
@@ -425,6 +435,8 @@ def _run_arm(args, *, session=None, arm_id=None, observer=None) -> None:
         next_status_s = started_s
         mit_velocity_max_age_s = max(3.0 / args.fps, 0.03)
         previous_command_send_finished_ns: int | None = None
+        motor_health = MotorHealthMonitor() if args.motor_health_check else None
+        next_motor_problem_log_s = 0.0
         while not stop and (session is None or not session.should_stop()):
             loop_started_ns = time.monotonic_ns()
             loop_started_s = time.monotonic()
@@ -445,6 +457,18 @@ def _run_arm(args, *, session=None, arm_id=None, observer=None) -> None:
             feedback_read_ms = (feedback_finished_ns - feedback_started_ns) * 1e-6
             feedback_row = cached_motor_row(robot_io) if csv_logger is not None else {}
             sample = vr_controller.latest_sample()
+            motor_problem = "" if motor_health is None else read_motor_health(motor_health, robot)
+            if motor_problem:
+                # Without a sample the controller stops following and holds,
+                # and Grip must be released before it follows again.
+                sample = None
+                if loop_started_s >= next_motor_problem_log_s:
+                    logger.error(
+                        "MOTOR PROBLEM: %s. The arm may be limp. Following is stopped; "
+                        "support the arm, then exit and check the supply before restarting.",
+                        motor_problem,
+                    )
+                    next_motor_problem_log_s = loop_started_s + 1.0
             frame = sample
             sample_pickup_ns = time.monotonic_ns()
             controller_started_ns = time.monotonic_ns()

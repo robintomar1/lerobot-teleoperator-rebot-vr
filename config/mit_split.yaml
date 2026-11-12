@@ -8,6 +8,7 @@ robot:
   robot_model: b601_dm
   rs_zero_confirmed: false
   gripper_enabled: true
+  motor_health_check: false  # true: stop following when a motor reports a fault or drops out
   robot_port: /dev/ttyACM0
   robot_id: rebot_b601_vr
   can_adapter: damiao
@@ -34,6 +35,8 @@ cartesian_mapping:
   orientation_filter_hz: 0.0  # 0: 关闭滤波
   position_deadband_m: 0.0008
   orientation_deadband_deg: 0.0003
+  tracking_jump_speed_m_s: 0.0  # 0: off. Stop following when the controller position steps faster than this.
+  tracking_jump_rate_deg_s: 0.0  # 0: off. The same for controller orientation.
 
 # split 逆运动学
 qp_ik:

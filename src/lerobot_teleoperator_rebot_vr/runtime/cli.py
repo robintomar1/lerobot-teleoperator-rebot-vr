@@ -143,6 +143,12 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
             "config/mit_split.yaml according to --motor-control-mode"
         ),
     )
+    robot.add_argument("--dry-run", action="store_true",
+                       help="B601-DM only: run the whole control path against a simulated follower; "
+                            "no port is opened and nothing moves")
+    robot.add_argument("--motor-health-check", action=argparse.BooleanOptionalAction, default=False,
+                       help="B601-DM: stop following and say why when a motor reports a fault or "
+                            "drops from enabled to disabled; torque and exit behaviour are unchanged")
     robot.add_argument("--robot-port", default="/dev/ttyACM0")
     robot.add_argument("--robot-id", default="rebot_b601_vr")
     robot.add_argument("--calibration-dir", type=Path, default=None,
@@ -225,6 +231,11 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     mapping.add_argument("--orientation-filter-hz", type=float, default=0.0)
     mapping.add_argument("--position-deadband-m", type=float, default=0.0)
     mapping.add_argument("--orientation-deadband-deg", type=float, default=0.0)
+    mapping.add_argument("--tracking-jump-speed-m-s", type=float, default=0.0,
+                         help="stop following when the controller position steps faster than this "
+                              "between samples (tracking lost or re-acquired); 0 disables the check")
+    mapping.add_argument("--tracking-jump-rate-deg-s", type=float, default=0.0,
+                         help="the same for controller orientation; 0 disables the check")
 
     ik = parser.add_argument_group("IK and safety")
     ik.add_argument("--qp-solver", choices=("scipy", "osqp"), default="scipy")
@@ -427,7 +438,13 @@ def validate_args(args: argparse.Namespace) -> None:
     ShutdownPolicy(args.disable_attempts, args.disable_interval_s, args.disable_feedback_wait_s,
                    request_feedback=args.disable_request_feedback)
     profile = arm_profile(args.robot_model)
-    for name in ("rs_zero_confirmed", "gripper_enabled"):
+    if type(args.dry_run) is not bool:
+        raise ValueError("dry_run must be boolean")
+    if args.dry_run and args.robot_model != "b601_dm":
+        raise ValueError("--dry-run simulates the B601-DM follower only")
+    if args.motor_health_check and args.robot_model != "b601_dm":
+        raise ValueError("--motor-health-check reads Damiao status codes; it is for B601-DM only")
+    for name in ("rs_zero_confirmed", "gripper_enabled", "motor_health_check"):
         if type(getattr(args, name)) is not bool:
             raise ValueError(f"{name} must be boolean")
     if args.robot_model == "b601_rs":
@@ -484,6 +501,8 @@ def validate_args(args: argparse.Namespace) -> None:
             "orientation-filter-hz": args.orientation_filter_hz,
             "position-deadband-m": args.position_deadband_m,
             "orientation-deadband-deg": args.orientation_deadband_deg,
+            "tracking-jump-speed-m-s": args.tracking_jump_speed_m_s,
+            "tracking-jump-rate-deg-s": args.tracking_jump_rate_deg_s,
             "feedback-fault-settle-time": args.feedback_fault_settle_time,
             "initial-feedback-request-hz": args.initial_feedback_request_hz,
         },

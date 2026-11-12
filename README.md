@@ -139,6 +139,43 @@ rebot-vr-teleoperate-dual --config config/dual_mit_split.yaml
 
 Use `--dry-run` to validate configuration or `--startup-zero-test` for a low-speed check.
 
+## Meta Quest
+
+The sender APK in `assest/` is built on the PICO SDK and does not run on a Quest. The
+[XRoboToolkit Quest client](https://github.com/XR-Robotics/XRoboToolkit-Unity-Client-Quest)
+(v1.0.1) speaks the same protocol, and by its source sends what this package expects: it
+connects straight to TCP port 63901 at an IP typed into the headset, needs no reply from the
+PC, uses the same packet framing, command codes and JSON keys, and converts controller poses
+to the same right-handed frame (X right, Y up, Z backward, metres). No Quest-specific switch
+is needed. This has been checked against that source and with a synthetic client, not yet on
+a headset.
+
+In the Quest app: enter the PC's IP under Network, switch on **Controller** and **Send**, and
+leave **Switch w/ A Button** off (it toggles sending on the same button that returns the arm
+to its initial pose).
+
+Checks that need no arm, and the last two no headset either:
+
+```bash
+# Stream check: connection, frame rate, parse errors, axes, buttons. Robot not connected.
+rebot-vr-print
+
+# Replay Quest-shaped packets at a server (rebot-vr-print or rebot-vr-teleoperate).
+rebot-vr-quest-sim --host 127.0.0.1 --scenario axes
+
+# The whole control path against a simulated follower: no port is opened, nothing moves.
+rebot-vr-teleoperate --dry-run --motor-control-mode mit --control-config config/mit_split.yaml
+```
+
+Two opt-in safeguards, off in the shipped profiles:
+
+- `tracking_jump_speed_m_s` / `tracking_jump_rate_deg_s`: stop following, until Grip is
+  released and pressed again, when the controller pose steps faster than a hand moves. A
+  headset that loses a controller with Grip held can report a pose far from the last one.
+- `motor_health_check` (B601-DM): stop following and log why when a motor reports a fault code
+  or drops from enabled to disabled, which is what a Damiao motor does after a supply dip.
+  The joint-angle feedback check does not see either.
+
 ## Controller Inputs
 
 | Input | Behavior |

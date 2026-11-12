@@ -102,6 +102,10 @@ class CartesianControlConfig:
     gripper_max_speed_deg_s: float = 90.0
     gripper_max_acceleration_deg_s2: float = 360.0
     max_command_feedback_error_deg: float | None = None
+    # Stop following when the controller pose steps faster than this between
+    # two samples (tracking lost or re-acquired). Zero disables each check.
+    tracking_jump_speed_m_s: float = 0.0
+    tracking_jump_rate_deg_s: float = 0.0
 
     def __post_init__(self) -> None:
         arm_profile(self.robot_model)
@@ -125,6 +129,8 @@ class CartesianControlConfig:
                 self.singularity_critical_threshold,
                 self.joint_limit_margin_deg,
                 self.qp_max_solve_time_ms,
+                self.tracking_jump_speed_m_s,
+                self.tracking_jump_rate_deg_s,
             ),
             dtype=np.float64,
         )
