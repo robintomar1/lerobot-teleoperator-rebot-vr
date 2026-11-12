@@ -237,6 +237,15 @@ def _run_arm(args, *, session=None, arm_id=None, observer=None) -> None:
         if args.dry_run:
             from ..hardware.simulated import SimulatedFollower
             raw_robot = SimulatedFollower(robot_config)
+            if args.view_urdf is not None:
+                from ..tools.arm_viewer import ArmViewer
+                viewer = ArmViewer(
+                    args.view_urdf,
+                    lambda: {name: motor.position_rad for name, motor in list(raw_robot.motors.items())},
+                    open_browser=not args.view_no_browser,
+                )
+                viewer.start()
+                print(f"Simulated arm on screen: {viewer.url}", flush=True)
         else:
             raw_robot = RebotB601Follower(robot_config)
     robot = ManagedFollower(

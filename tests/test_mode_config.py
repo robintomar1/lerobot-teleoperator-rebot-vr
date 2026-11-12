@@ -78,8 +78,8 @@ def test_yaml_files_cover_every_applicable_cli_parameter() -> None:
     config_dir = Path(__file__).parents[1] / "config"
 
     for filename, excluded in (
-        ("pos_vel_split.yaml", {"control_config", "dry_run", *MIT_PARAMETERS}),
-        ("mit_split.yaml", {"control_config", "dry_run"}),
+        ("pos_vel_split.yaml", {"control_config", "dry_run", "view_urdf", "view_no_browser", *MIT_PARAMETERS}),
+        ("mit_split.yaml", {"control_config", "dry_run", "view_urdf", "view_no_browser"}),
     ):
         path = config_dir / filename
         configured = set(
@@ -103,7 +103,7 @@ def test_named_control_profiles_are_complete_and_loadable(
     destinations = {
         action.dest for action in parser._actions if action.dest != "help"
     }
-    excluded = {"control_config", "dry_run"}
+    excluded = {"control_config", "dry_run", "view_urdf", "view_no_browser"}
     if motor_mode == "pos_vel":
         excluded.update(MIT_PARAMETERS)
 

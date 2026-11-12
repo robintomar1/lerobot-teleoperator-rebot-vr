@@ -146,6 +146,11 @@ def build_parser(description: str | None = None) -> argparse.ArgumentParser:
     robot.add_argument("--dry-run", action="store_true",
                        help="B601-DM only: run the whole control path against a simulated follower; "
                             "no port is opened and nothing moves")
+    robot.add_argument("--view-urdf", type=Path, default=None, metavar="URDF",
+                       help="with --dry-run: show the simulated arm in a browser (MeshCat), drawn from "
+                            "this URDF with meshes, e.g. Seeed's ReBot_Arm_DM.urdf; needs the 'view' extra")
+    robot.add_argument("--view-no-browser", action="store_true",
+                       help="with --view-urdf: print the viewer address instead of opening a browser")
     robot.add_argument("--motor-health-check", action=argparse.BooleanOptionalAction, default=False,
                        help="B601-DM: stop following and say why when a motor reports a fault or "
                             "drops from enabled to disabled; torque and exit behaviour are unchanged")
@@ -442,6 +447,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("dry_run must be boolean")
     if args.dry_run and args.robot_model != "b601_dm":
         raise ValueError("--dry-run simulates the B601-DM follower only")
+    if args.view_urdf is not None and not args.dry_run:
+        raise ValueError("--view-urdf draws the simulated follower; it needs --dry-run")
     if args.motor_health_check and args.robot_model != "b601_dm":
         raise ValueError("--motor-health-check reads Damiao status codes; it is for B601-DM only")
     for name in ("rs_zero_confirmed", "gripper_enabled", "motor_health_check"):

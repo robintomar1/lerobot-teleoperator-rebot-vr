@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8"]
 qp = ["osqp>=1.0,<2"]
+view = ["meshcat>=0.3"]
 record = ["lerobot[dataset]>=0.6.2,<0.7.0", "opencv-python-headless>=4.10,<5"]
 
 [project.scripts]
